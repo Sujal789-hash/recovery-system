@@ -1,0 +1,690 @@
+import React, { useState, useEffect } from 'react';
+import {
+HardDrive,
+File as FileIcon,
+Folder,
+RefreshCw,
+Trash2,
+Plus,
+AlertTriangle,
+Activity,
+Zap,
+Save,
+RotateCcw,
+Info,
+ArrowRight,
+CornerLeftUp,
+FolderPlus
+} from 'lucide-react';
+
+// --- Constants ---
+const TOTAL_BLOCKS = 64;
+const BLOCK_SIZE = 4; // KB
+const SYSTEM_RESERVED = 4; // Blocks reserved for system
+
+// --- Helper Types & Logic ---
+
+const generateColor = (id) => {
+const hue = (id * 137.508) % 360; // Golden angle approximation for distribution
+return `hsl(${hue}, 70%, 60%)`;
+};
+
+export default function FileSystemSimulator() {
+// --- State ---
+
+// Disk State: Array of block objects
+const [disk, setDisk] = useState([]);
+
+// File System State: Array of file objects
+// Added parentId to files for directory structure
+const [files, setFiles] = useState([]);
+
+// Folder State: Array of folder objects { id, name, parentId }
+const [folders, setFolders] = useState([]);
+const [currentFolderId, setCurrentFolderId] = useState(null); // null is root
+
+// System Metrics
+const [metrics, setMetrics] = useState({
+fragmentation: 0,
+readSpeed: 100, // Normalized score
+freeSpace: 0
+});
+
+const [logs, setLogs] = useState([]);
+const [isRecovering, setIsRecovering] = useState(false);
+const [isOptimizing, setIsOptimizing] = useState(false);
+
+// UX State
+const [hoveredFileId, setHoveredFileId] = useState(null);
+const [hoveredBlock, setHoveredBlock] = useState(null);
+
+// --- Initialization ---
+
+useEffect(() => {
+initializeDisk();
+}, []);
+
+const initializeDisk = () => {
+const newDisk = Array(TOTAL_BLOCKS).fill(null).map((_, i) => ({
+id: i,
+fileId: null,
+status: i < SYSTEM_RESERVED ? 'system' : 'free' , nextBlock: null })); setDisk(newDisk); setFiles([]); setFolders([]);
+  setCurrentFolderId(null); addLog("System initialized. Drive formatted."); updateMetrics(newDisk, []); }; // --- Core
+  Logic --- const addLog=(message)=> {
+  setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${message}`, ...prev.slice(0, 9)]);
+  };
+
+  const updateMetrics = (currentDisk, currentFiles) => {
+  // 1. Free Space
+  const freeBlocks = currentDisk.filter(b => b.status === 'free').length;
+  const freeSpaceKB = freeBlocks * BLOCK_SIZE;
+
+  // 2. Fragmentation & Read Speed (Simulated)
+  let totalJumps = 0;
+  let totalBlocks = 0;
+
+  currentFiles.forEach(file => {
+  let currentBlockIdx = file.startBlock;
+  let fileBlocks = 0;
+
+  while (currentBlockIdx !== null && currentBlockIdx !== undefined) {
+  fileBlocks++;
+  const block = currentDisk[currentBlockIdx];
+  if (!block) break; // Error case
+
+  if (block.nextBlock !== null) {
+  // Distance between this block and the next
+  totalJumps += Math.abs(block.nextBlock - currentBlockIdx);
+  }
+  currentBlockIdx = block.nextBlock;
+  }
+  totalBlocks += fileBlocks;
+  });
+
+  const avgJump = totalBlocks > 0 ? totalJumps / totalBlocks : 1;
+  const fragmentationScore = Math.min(100, Math.max(0, (avgJump - 1) * 10));
+  const speedScore = Math.max(10, 100 - fragmentationScore);
+
+  setMetrics({
+  freeSpace: freeSpaceKB,
+  fragmentation: Math.round(fragmentationScore),
+  readSpeed: Math.round(speedScore)
+  });
+  };
+
+  const addFile = () => {
+  const sizeKB = Math.floor(Math.random() * 12) + 4; // 4KB to 16KB
+  const blocksNeeded = Math.ceil(sizeKB / BLOCK_SIZE);
+  const id = Date.now();
+  const name = `data_${id.toString().slice(-4)}.bin`;
+  const color = generateColor(id);
+
+  const freeIndices = disk
+  .map((b, i) => b.status === 'free' ? i : null)
+  .filter(i => i !== null);
+
+  if (freeIndices.length < blocksNeeded) { addLog(`Error: Not enough space to create ${name} (${sizeKB}KB)`); return; }
+    const newDisk=[...disk]; const allocatedIndices=[]; // Pick random free blocks to simulate fragmentation for (let
+    i=0; i < blocksNeeded; i++) { allocatedIndices.push(freeIndices[i]); } // Link them for (let i=0; i <
+    allocatedIndices.length; i++) { const idx=allocatedIndices[i]; const nextIdx=i < allocatedIndices.length - 1 ?
+    allocatedIndices[i + 1] : null; newDisk[idx]={ ...newDisk[idx], fileId: id, status: 'used' , nextBlock: nextIdx }; }
+    const newFile={ id, name, size: sizeKB, startBlock: allocatedIndices[0], color, parentId: currentFolderId }; const
+    newFiles=[...files, newFile]; setDisk(newDisk); setFiles(newFiles); updateMetrics(newDisk, newFiles);
+    addLog(`Created ${name} (${sizeKB}KB) in ${getCurrentFolderName()}`); }; const createFolder=()=> {
+    const id = Date.now();
+    const currentFolderFiles = folders.filter(f => f.parentId === currentFolderId);
+    const name = `New Folder ${currentFolderFiles.length + 1}`;
+
+    setFolders([...folders, { id, name, parentId: currentFolderId }]);
+    addLog(`Created folder: ${name}`);
+    };
+
+    const deleteFile = (fileId, e) => {
+    if (e) e.stopPropagation();
+    const file = files.find(f => f.id === fileId);
+    if (!file) return;
+
+    const newDisk = [...disk];
+
+    // Free blocks
+    let currentIdx = file.startBlock;
+    while (currentIdx !== null) {
+    if (!newDisk[currentIdx]) break;
+
+    const next = newDisk[currentIdx].nextBlock;
+    newDisk[currentIdx] = {
+    ...newDisk[currentIdx],
+    fileId: null,
+    status: 'free',
+    nextBlock: null
+    };
+    currentIdx = next;
+    }
+
+    const newFiles = files.filter(f => f.id !== fileId);
+
+    setDisk(newDisk);
+    setFiles(newFiles);
+    updateMetrics(newDisk, newFiles);
+    setHoveredFileId(null);
+    addLog(`Deleted ${file.name}`);
+    };
+
+    const deleteFolder = (folderId, e) => {
+    if (e) e.stopPropagation();
+
+    // 1. Find all files recursively (simple approach: just finding all descendants)
+    // To make it simple for React state, we will just delete direct children and rely on user to empty folder
+    // OR we implement a recursive finder. Let's do recursive for a good sim.
+
+    const getAllDescendantIds = (rootId) => {
+    let folderIds = [rootId];
+    let fileIds = [];
+
+    // Find direct children
+    const childFolders = folders.filter(f => f.parentId === rootId);
+    const childFiles = files.filter(f => f.parentId === rootId);
+
+    fileIds.push(...childFiles.map(f => f.id));
+
+    childFolders.forEach(sub => {
+    const result = getAllDescendantIds(sub.id);
+    folderIds.push(...result.folderIds);
+    fileIds.push(...result.fileIds);
+    });
+
+    return { folderIds, fileIds };
+    };
+
+    const { folderIds, fileIds } = getAllDescendantIds(folderId);
+
+    // Delete files logic copied from deleteFile but bulk
+    const newDisk = [...disk];
+
+    fileIds.forEach(fid => {
+    const file = files.find(f => f.id === fid);
+    if(file) {
+    let currentIdx = file.startBlock;
+    while (currentIdx !== null) {
+    if (!newDisk[currentIdx]) break;
+    const next = newDisk[currentIdx].nextBlock;
+    newDisk[currentIdx] = { ...newDisk[currentIdx], fileId: null, status: 'free', nextBlock: null };
+    currentIdx = next;
+    }
+    }
+    });
+
+    const newFiles = files.filter(f => !fileIds.includes(f.id));
+    const newFolders = folders.filter(f => !folderIds.includes(f.id));
+
+    setDisk(newDisk);
+    setFiles(newFiles);
+    setFolders(newFolders);
+    updateMetrics(newDisk, newFiles);
+    addLog(`Deleted folder and ${fileIds.length} items`);
+    };
+
+    // --- Navigation Helpers ---
+
+    const navigateUp = () => {
+    if (currentFolderId === null) return;
+    const current = folders.find(f => f.id === currentFolderId);
+    setCurrentFolderId(current ? current.parentId : null);
+    };
+
+    const enterFolder = (folderId) => {
+    setCurrentFolderId(folderId);
+    };
+
+    const getCurrentFolderName = () => {
+    if (currentFolderId === null) return 'Root';
+    const folder = folders.find(f => f.id === currentFolderId);
+    return folder ? folder.name : 'Unknown';
+    };
+
+    // --- Simulation Features ---
+
+    const simulateCrash = () => {
+    const corruptionCount = Math.floor(Math.random() * 4) + 3;
+    const newDisk = [...disk];
+    let corrupted = 0;
+
+    for (let i = 0; i < corruptionCount; i++) { const idx=Math.floor(Math.random() * (TOTAL_BLOCKS - SYSTEM_RESERVED)) +
+      SYSTEM_RESERVED; if (newDisk[idx].status==='used' ) { newDisk[idx]={ ...newDisk[idx], status: 'corrupted' };
+      corrupted++; } } setDisk(newDisk); addLog(`⚠️ CRASH! ${corrupted} blocks corrupted. Data integrity compromised.`);
+      }; const recoverFileSystem=()=> {
+      setIsRecovering(true);
+      addLog("Running fsck (File System Consistency Check)...");
+
+      setTimeout(() => {
+      const newDisk = [...disk];
+      const newFiles = [...files];
+      let recoveredCount = 0;
+
+      newFiles.forEach(file => {
+      let currentIdx = file.startBlock;
+      while (currentIdx !== null) {
+      const block = newDisk[currentIdx];
+      if (block.status === 'corrupted' || (block.status === 'free' && block.fileId === file.id)) {
+      block.status = 'used';
+      recoveredCount++;
+      }
+      currentIdx = block.nextBlock;
+      }
+      });
+
+      setDisk(newDisk);
+      setIsRecovering(false);
+      addLog(`Recovery Complete. Repaired ${recoveredCount} blocks.`);
+      }, 1500);
+      };
+
+      const optimizeDrive = () => {
+      setIsOptimizing(true);
+      addLog("Defragmenting drive...");
+
+      setTimeout(() => {
+      const packedFiles = [];
+      const blocksMap = new Map();
+
+      files.forEach(file => {
+      const fileBlocks = [];
+      let curr = file.startBlock;
+      while(curr !== null) {
+      if(disk[curr]) {
+      fileBlocks.push(disk[curr]);
+      curr = disk[curr].nextBlock;
+      } else {
+      break;
+      }
+      }
+      blocksMap.set(file.id, fileBlocks);
+      packedFiles.push({ ...file });
+      });
+
+      const optimizedDisk = Array(TOTAL_BLOCKS).fill(null).map((_, i) => ({
+      id: i,
+      fileId: null,
+      status: i < SYSTEM_RESERVED ? 'system' : 'free' , nextBlock: null })); let writeHead=SYSTEM_RESERVED;
+        packedFiles.forEach(file=> {
+        const fileBlocks = blocksMap.get(file.id);
+        if (!fileBlocks) return;
+
+        file.startBlock = writeHead;
+
+        for (let i = 0; i < fileBlocks.length; i++) { const blockIdx=writeHead + i; const isLast=i===fileBlocks.length -
+          1; if (blockIdx < TOTAL_BLOCKS) { optimizedDisk[blockIdx]={ id: blockIdx, fileId: file.id, status: 'used' ,
+          nextBlock: isLast ? null : blockIdx + 1 }; } } writeHead +=fileBlocks.length; }); setDisk(optimizedDisk);
+          setFiles(packedFiles); updateMetrics(optimizedDisk, packedFiles); setIsOptimizing(false); addLog("Defrag
+          Complete. Files are now contiguous."); }, 2000); }; // --- UX Helpers --- const handleBlockEnter=(block)=> {
+          setHoveredBlock(block);
+          if (block.fileId) setHoveredFileId(block.fileId);
+          };
+
+          const handleBlockLeave = () => {
+          setHoveredBlock(null);
+          setHoveredFileId(null);
+          };
+
+          const getBlockSequenceIndex = (fileId, blockId) => {
+          const file = files.find(f => f.id === fileId);
+          if (!file) return null;
+          let curr = file.startBlock;
+          let seq = 1;
+          while (curr !== null) {
+          if (curr === blockId) return seq;
+          if (!disk[curr]) break;
+          curr = disk[curr].nextBlock;
+          seq++;
+          }
+          return '?';
+          };
+
+          // --- Render ---
+
+          // Filter items for current directory
+          const currentItems = [
+          ...folders.filter(f => f.parentId === currentFolderId).map(f => ({ ...f, type: 'folder' })),
+          ...files.filter(f => f.parentId === currentFolderId).map(f => ({ ...f, type: 'file' }))
+          ];
+
+          return (
+          <div className="min-h-screen bg-slate-950 text-slate-100 font-sans p-4 md:p-8 flex flex-col items-center">
+            <div className="max-w-6xl w-full">
+
+              {/* Header */}
+              <header
+                className="mb-8 flex flex-col md:flex-row justify-between items-center border-b border-slate-800 pb-6">
+                <div>
+                  <h1 className="text-3xl font-bold flex items-center gap-3 text-blue-400">
+                    <HardDrive className="w-8 h-8" />
+                    DriveSim <span className="text-slate-500 text-lg font-normal">File System Visualizer</span>
+                  </h1>
+                  <p className="text-slate-400 mt-2 max-w-lg">
+                    Interactive demonstration of linked file allocation, fragmentation, and recovery.
+                    Hover over files to trace their block chains.
+                  </p>
+                </div>
+                <div className="flex gap-4 mt-4 md:mt-0">
+                  <button onClick={initializeDisk}
+                    className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition border border-slate-700">
+                    <RotateCcw className="w-4 h-4" /> Reset Drive
+                  </button>
+                </div>
+              </header>
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+                {/* Main Visualizer Area (8 cols) */}
+                <div className="lg:col-span-8 space-y-6">
+
+                  {/* Disk Map */}
+                  <div
+                    className="bg-slate-900/50 p-6 rounded-xl border border-slate-800 shadow-2xl relative overflow-hidden">
+                    <div className="flex justify-between items-center mb-6">
+                      <h2 className="text-xl font-semibold flex items-center gap-2">
+                        <Activity className="w-5 h-5 text-blue-400" /> Storage Grid
+                      </h2>
+                      <div className="flex gap-4 text-xs font-medium">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 bg-slate-700 rounded-sm"></div> Reserved
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 bg-slate-800 border border-slate-700 rounded-sm"></div> Empty
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 bg-blue-500 rounded-sm"></div> Data
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 bg-red-500 rounded-sm"></div> Corrupt
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* The Grid */}
+                    <div className="grid grid-cols-8 gap-1.5 mb-6">
+                      {disk.map((block) => {
+                      const isFileBlock = block.status === 'used' && block.fileId;
+                      const isHoveredFile = hoveredFileId && block.fileId === hoveredFileId;
+
+                      // Visual Logic
+                      let bgColor = 'bg-slate-900 border border-slate-800'; // Default free
+                      let content = <span className="text-[10px] text-slate-700">{block.id}</span>;
+                      let opacity = hoveredFileId && !isHoveredFile && block.status !== 'system' ? 'opacity-30' :
+                      'opacity-100';
+                      let scale = isHoveredFile ? 'scale-110 z-10 shadow-lg' : 'scale-100';
+
+                      if (block.status === 'system') {
+                      bgColor = 'bg-slate-700 border-transparent';
+                      content = <span className="text-[8px] text-slate-400">SYS</span>;
+                      }
+
+                      if (block.status === 'corrupted') {
+                      bgColor = 'bg-red-500/20 border-red-500 text-red-500 animate-pulse';
+                      content =
+                      <AlertTriangle className="w-3 h-3" />;
+                      }
+
+                      // If it's a valid file block
+                      if (isFileBlock) {
+                      const file = files.find(f => f.id === block.fileId);
+                      const color = file ? file.color : '#666';
+
+                      if (isHoveredFile) {
+                      // Highlight Mode: Show sequence number
+                      const seq = getBlockSequenceIndex(block.fileId, block.id);
+                      bgColor = ''; // controlled by style
+                      content = <span className="text-white font-bold text-lg drop-shadow-md">{seq}</span>;
+                      } else {
+                      // Normal Mode
+                      content = null;
+                      }
+
+                      return (
+                      <div key={block.id} onMouseEnter={()=> handleBlockEnter(block)}
+                        onMouseLeave={handleBlockLeave}
+                        className={`aspect-square rounded-md flex items-center justify-center transition-all
+                        duration-200 cursor-pointer ${opacity} ${scale} ${bgColor}`}
+                        style={{ backgroundColor: isHoveredFile ? color : (block.status === 'corrupted' ? undefined :
+                        `${color}60`) }}
+                        >
+                        {content}
+                      </div>
+                      );
+                      }
+
+                      // Default / System / Free Block Render
+                      return (
+                      <div key={block.id} onMouseEnter={()=> handleBlockEnter(block)}
+                        onMouseLeave={handleBlockLeave}
+                        className={`aspect-square rounded-md flex items-center justify-center transition-all
+                        duration-200 ${bgColor} ${opacity}`}
+                        >
+                        {content}
+                      </div>
+                      );
+                      })}
+                    </div>
+
+                    {/* Block Inspector Panel */}
+                    <div
+                      className="h-12 bg-slate-950 rounded-lg border border-slate-800 flex items-center px-4 text-sm">
+                      {hoveredBlock ? (
+                      <div className="flex items-center gap-4 w-full animate-in fade-in slide-in-from-bottom-2">
+                        <span className="font-mono text-slate-400">Block #{hoveredBlock.id}</span>
+                        <div className="h-4 w-px bg-slate-700"></div>
+                        <span className={`font-medium ${hoveredBlock.status==='free' ? 'text-slate-500'
+                          : 'text-blue-300' }`}>
+                          {hoveredBlock.status.toUpperCase()}
+                        </span>
+                        {hoveredBlock.fileId && (
+                        <>
+                          <div className="h-4 w-px bg-slate-700"></div>
+                          <span className="text-slate-300">File: {files.find(f => f.id === hoveredBlock.fileId)?.name ||
+                            'Unknown'}</span>
+                          <ArrowRight className="w-3 h-3 text-slate-600 mx-1" />
+                          <span className="text-slate-400">
+                            {hoveredBlock.nextBlock !== null ? `Next: #${hoveredBlock.nextBlock}` : 'End of File'}
+                          </span>
+                        </>
+                        )}
+                      </div>
+                      ) : (
+                      <span className="text-slate-600 italic">Hover over a block to inspect details...</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Metrics & Logs */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Metrics */}
+                    <div className="space-y-3">
+                      <MetricCard label="Fragmentation Level" value={`${metrics.fragmentation}%`}
+                        subtext={metrics.fragmentation> 30 ? "High scattering. Defrag recommended." : "Healthy layout."}
+                        icon={
+                        <Activity className="w-5 h-5" />}
+                        color={metrics.fragmentation > 50 ? 'text-red-400' : 'text-emerald-400'}
+                        />
+                        <MetricCard label="Simulated Read Speed" value={`${metrics.readSpeed}/100`}
+                          subtext={metrics.readSpeed < 60 ? "Slow. Head seeking required." : "Fast sequential access." }
+                          icon={<Zap className="w-5 h-5" />}
+                        color={metrics.readSpeed
+                        < 50 ? 'text-orange-400' : 'text-blue-400' } />
+                    </div>
+
+                    {/* Log Console */}
+                    <div
+                      className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 font-mono text-xs h-40 overflow-y-auto flex flex-col-reverse">
+                      {logs.length === 0 && <span className="text-slate-600 italic mt-auto">System ready. waiting for
+                        input...</span>}
+                      {logs.map((log, i) => (
+                      <div key={i} className="text-slate-300 border-b border-white/5 py-1">
+                        <span className="text-slate-500 mr-2">{log.split(']')[0]}]</span>
+                        {log.split(']')[1]}
+                      </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Column (4 cols) - Controls */}
+                <div className="lg:col-span-4 space-y-6">
+
+                  {/* Control Panel */}
+                  <div className="bg-slate-900/50 p-6 rounded-xl border border-slate-800 shadow-xl">
+                    <h2 className="text-lg font-semibold mb-4 text-slate-200">Disk Operations</h2>
+
+                    <div className="grid grid-cols-2 gap-3 mb-3">
+                      <button onClick={createFolder} disabled={isRecovering || isOptimizing}
+                        className="bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white p-3 rounded-lg flex flex-col items-center justify-center gap-1 transition">
+                        <FolderPlus className="w-5 h-5 text-yellow-500" />
+                        <span className="text-xs font-bold">New Folder</span>
+                      </button>
+
+                      <button onClick={addFile} disabled={isRecovering || isOptimizing}
+                        className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white p-3 rounded-lg flex flex-col items-center justify-center gap-1 transition">
+                        <Plus className="w-5 h-5" />
+                        <span className="text-xs font-bold">New File</span>
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <button onClick={simulateCrash}
+                        className="bg-slate-800 hover:bg-red-900/30 border border-slate-700 hover:border-red-500/50 text-slate-300 hover:text-red-200 p-3 rounded-lg flex flex-col items-center justify-center gap-1 transition">
+                        <AlertTriangle className="w-5 h-5 mb-1" />
+                        <span className="text-xs font-bold">Crash</span>
+                      </button>
+
+                      <button onClick={recoverFileSystem} disabled={isRecovering || isOptimizing}
+                        className="bg-slate-800 hover:bg-orange-900/30 border border-slate-700 hover:border-orange-500/50 text-slate-300 hover:text-orange-200 p-3 rounded-lg flex flex-col items-center justify-center gap-1 transition">
+                        <RefreshCw className={`w-5 h-5 mb-1 ${isRecovering ? 'animate-spin' : '' }`} />
+                        <span className="text-xs font-bold">Repair</span>
+                      </button>
+                    </div>
+
+                    <button onClick={optimizeDrive} disabled={isRecovering || isOptimizing}
+                      className="mt-3 w-full bg-emerald-900/20 hover:bg-emerald-900/40 border border-emerald-800/50 hover:border-emerald-500 text-emerald-100 p-3 rounded-lg flex items-center justify-center gap-3 transition">
+                      <Zap className={`w-5 h-5 ${isOptimizing ? 'animate-pulse' : '' }`} />
+                      <span className="text-sm font-bold">Defragment Drive</span>
+                    </button>
+                  </div>
+
+                  {/* File Explorer */}
+                  <div
+                    className="bg-slate-900/50 p-6 rounded-xl border border-slate-800 shadow-xl flex-1 min-h-[300px] flex flex-col">
+
+                    {/* Explorer Header */}
+                    <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-2">
+                      <div className="flex items-center gap-2 overflow-hidden">
+                        <button onClick={navigateUp} disabled={currentFolderId===null}
+                          className="p-1.5 hover:bg-slate-800 rounded-md disabled:opacity-30 disabled:hover:bg-transparent transition"
+                          title="Go Up">
+                          <CornerLeftUp className="w-4 h-4 text-slate-400" />
+                        </button>
+                        <div className="flex flex-col">
+                          <span className="text-xs text-slate-500 uppercase font-bold tracking-wider">Location</span>
+                          <span className="text-sm font-medium text-slate-300 truncate max-w-[150px]">
+                            /{getCurrentFolderName()}
+                          </span>
+                        </div>
+                      </div>
+                      <span
+                        className="text-xs font-mono bg-slate-800 px-2 py-1 rounded text-slate-400">{currentItems.length}
+                        items</span>
+                    </div>
+
+                    {/* Items List */}
+                    <div className="space-y-2 overflow-y-auto max-h-[350px] pr-2 custom-scrollbar">
+                      {currentItems.length === 0 ? (
+                      <div
+                        className="text-center py-12 text-slate-600 border-2 border-dashed border-slate-800 rounded-lg">
+                        <Save className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                        <p className="text-sm">Empty Directory</p>
+                      </div>
+                      ) : (
+                      currentItems.map(item => (
+                      <div key={item.id} onMouseEnter={()=> item.type === 'file' && setHoveredFileId(item.id)}
+                        onMouseLeave={() => item.type === 'file' && setHoveredFileId(null)}
+                        onClick={() => item.type === 'folder' && enterFolder(item.id)}
+                        className={`group flex items-center justify-between p-3 rounded-lg border transition
+                        cursor-pointer select-none
+                        ${hoveredFileId === item.id
+                        ? 'bg-slate-800 border-blue-500/50 shadow-lg translate-x-1'
+                        : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                        }
+                        `}
+                        >
+                        <div className="flex items-center gap-3 overflow-hidden">
+                          <div className={`w-8 h-8 rounded flex items-center justify-center shadow-inner shrink-0`}
+                            style={{ backgroundColor: item.type==='file' ? `${item.color}20` : '#eab30820' , color:
+                            item.type==='file' ? item.color : '#eab308' }}>
+                            {item.type === 'file' ?
+                            <FileIcon className="w-4 h-4" /> :
+                            <Folder className="w-4 h-4" />}
+                          </div>
+                          <div className="truncate">
+                            <div className={`font-medium text-sm transition truncate ${hoveredFileId===item.id
+                              ? 'text-white' : 'text-slate-300' }`}>
+                              {item.name}
+                            </div>
+                            {item.type === 'file' && (
+                            <div className="text-[10px] text-slate-500 font-mono">
+                              {Math.ceil(item.size / BLOCK_SIZE)} Blocks • Start #{item.startBlock}
+                            </div>
+                            )}
+                            {item.type === 'folder' && (
+                            <div className="text-[10px] text-slate-500 font-mono">
+                              Directory
+                            </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <button onClick={(e)=> item.type === 'file' ? deleteFile(item.id, e) : deleteFolder(item.id, e)}
+                          className="p-2 text-slate-600 hover:text-red-400 hover:bg-red-400/10 rounded transition
+                          opacity-0 group-hover:opacity-100 shrink-0"
+                          title="Delete"
+                          >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                      ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Helper/Guide Box */}
+                  <div className="bg-blue-900/10 p-4 rounded-xl border border-blue-900/30 text-xs text-slate-400">
+                    <h3 className="flex items-center gap-2 text-blue-300 font-bold mb-2">
+                      <Info className="w-4 h-4" /> How to use
+                    </h3>
+                    <ul className="space-y-2 list-disc pl-4 marker:text-blue-500">
+                      <li><strong className="text-slate-300">Folders:</strong> Create folders to organize files. Click
+                        to enter.</li>
+                      <li><strong className="text-slate-300">Hover:</strong> Hover over files to see block chains.</li>
+                      <li><strong className="text-slate-300">Defrag:</strong> Optimize to group dispersed blocks.</li>
+                    </ul>
+                  </div>
+
+                </div>
+              </div>
+            </div>
+          </div>
+          );
+          }
+
+          function MetricCard({ label, value, subtext, icon, color }) {
+          return (
+          <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 flex items-start justify-between">
+            <div>
+              <p className="text-slate-400 text-xs uppercase tracking-wider mb-1 font-bold">{label}</p>
+              <p className={`text-2xl font-bold ${color} mb-1`}>{value}</p>
+              <p className="text-[10px] text-slate-500">{subtext}</p>
+            </div>
+            <div className={`p-2 rounded-lg bg-slate-950 border border-slate-800 ${color.replace('text', 'text'
+              ).replace('400', '500/20' )}`}>
+              {React.cloneElement(icon, { className: `w-5 h-5 ${color}` })}
+            </div>
+          </div>
+          );
+          }
